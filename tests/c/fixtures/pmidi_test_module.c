@@ -7,7 +7,8 @@
   inputs and two outputs, one of each without an interface name, or no
   device at all while csound_test_pmidi_no_devices is set. Each device has
   a stream of its own, and csound_test_pmidi_writes counts the messages
-  written to each.
+  written to each; an input's stream reads the messages
+  csound_test_pmidi_queue gave it.
 */
 
 #define Pm_Initialize csound_test_Pm_Initialize
@@ -43,6 +44,9 @@ static const PmDeviceInfo devices[] = {
 };
 static int streams[4];  /* one per device */
 int csound_test_pmidi_writes[4];
+/* The messages queued for each input to read, first to last. */
+static PmMessage queued[2][16];
+static int queued_count[2], queued_read[2];
 int csound_test_pmidi_no_devices = 0;
 
 PmError Pm_Initialize(void) { return pmNoError; }
@@ -85,11 +89,20 @@ PmError Pm_SetFilter(PortMidiStream *s, int32_t filters)
     (void) s; (void) filters;
     return pmNoError;
 }
-PmError Pm_Poll(PortMidiStream *s) { (void) s; return pmNoData; }
+PmError Pm_Poll(PortMidiStream *s)
+{
+    int id = (int *) s - streams;
+    return id < 2 && queued_read[id] < queued_count[id]
+               ? (PmError) pmGotData : pmNoData;
+}
 int Pm_Read(PortMidiStream *s, PmEvent *buffer, int32_t length)
 {
-    (void) s; (void) buffer; (void) length;
-    return 0;
+    int id = (int *) s - streams;
+    if (id >= 2 || length < 1 || queued_read[id] >= queued_count[id])
+      return 0;
+    buffer->message = queued[id][queued_read[id]++];
+    buffer->timestamp = 0;
+    return 1;
 }
 PmError Pm_Write(PortMidiStream *s, PmEvent *buffer, int32_t length)
 {
@@ -115,6 +128,24 @@ int32_t csound_test_pmidi_open_input(CSOUND *csound, void **data,
 int32_t csound_test_pmidi_close_input(CSOUND *csound, void *data)
 {
     return CloseMidiInDevice_(csound, data);
+}
+
+/* Queues a message for input `device`, 0 or 1, to read; -1 empties both. */
+void csound_test_pmidi_queue(int device, int status, int data1, int data2)
+{
+    if (device < 0) {
+      queued_count[0] = queued_count[1] = 0;
+      queued_read[0] = queued_read[1] = 0;
+      return;
+    }
+    if (queued_count[device] < 16)
+      queued[device][queued_count[device]++] = Pm_Message(status, data1, data2);
+}
+
+int32_t csound_test_pmidi_read(CSOUND *csound, void *data,
+                               unsigned char *mbuf, int32_t nbytes)
+{
+    return ReadMidiData_(csound, data, mbuf, nbytes);
 }
 
 int32_t csound_test_pmidi_open_output(CSOUND *csound, void **data,

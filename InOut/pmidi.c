@@ -410,7 +410,7 @@ static int32_t OpenMidiOutDevice_(CSOUND *csound, void **userData, const char *d
 static int32_t ReadMidiData_(CSOUND *csound, void *userData,
                          unsigned char *mbuf, int32_t nbytes)
 {
-  int32_t   n, retval, st, d1, d2, nd, len;
+  int32_t   n, retval, st, d1, d2, nd, len, ported;
   unsigned char port = 0, map = 0;
     PmEvent         mev;
     pmall_data *data;
@@ -436,12 +436,14 @@ static int32_t ReadMidiData_(CSOUND *csound, void *userData,
             continue;
           /* ignore most system messages */
           if (UNLIKELY(st >= 0xF0 &&
-                       !(st == 0xF8 || st == 0xFA || st == 0xFB ||
-                         st == 0xFC || st == 0xFF)))
+                       !(st == 0xF2 || st == 0xF8 || st == 0xFA ||
+                         st == 0xFB || st == 0xFC || st == 0xFF)))
             continue;
-          /* a port byte follows the status only if data bytes do */
-          nd = datbyts[(st - 0x80) >> 4];
-          len = nd + 1 + ((map && nd > 0) ? 1 : 0);
+          /* a song position has two data bytes; a port byte follows a
+             channel message's status, and only if data bytes do */
+          nd = (st == 0xF2) ? 2 : datbyts[(st - 0x80) >> 4];
+          ported = (map && nd > 0 && st < 0xF0) ? 1 : 0;
+          len = nd + 1 + ported;
           nbytes -= len;
           if (UNLIKELY(nbytes < 0)) {
             portMidiErrMsg(csound, Str("buffer overflow in MIDI input\n"));
@@ -457,13 +459,13 @@ static int32_t ReadMidiData_(CSOUND *csound, void *userData,
             case 1:
               *mbuf++ = (unsigned char) st;
               /* if mapping add port to byte after status */
-              if(map) *mbuf++ = (unsigned char) (0x80 | port);
+              if(ported) *mbuf++ = (unsigned char) (0x80 | port);
               *mbuf++ = (unsigned char) d1;
               break;
             case 2:
               *mbuf++ = (unsigned char) st;
               /* if mapping add port to byte after status */
-              if(map) *mbuf++ = (unsigned char) (0x80 | port);
+              if(ported) *mbuf++ = (unsigned char) (0x80 | port);
               *mbuf++ = (unsigned char) d1;
               *mbuf++ = (unsigned char) d2;
               break;

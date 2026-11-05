@@ -130,6 +130,9 @@ extern "C" {
     unsigned char mbuf[MBUFSIZ];
     unsigned char *bufp, *endatp;
     int16   datreq, datcnt;
+    /* The last Song Position Pointer heard, in sixteenths, and whether one
+       came this k-cycle: what midisongpos reports. */
+    int32_t     songPosition, songPositionHeard;
   } MGLOBAL;
 
   typedef struct osc_mess {

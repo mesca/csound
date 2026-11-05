@@ -1726,6 +1726,7 @@ const OENTRY opcodlst_1[] = {
     { "midistop",  S(MIDIKMB),0,     "k",    "",     NULL, midi_stop, NULL    },
     { "midicontinue",  S(MIDIKMB),0,     "k",    "",     NULL, midi_continue, NULL    },
   { "midiclockfreq",  S(MIDIKMB),0,     "k",    "", NULL, midi_clock_freq, NULL    },
+  { "midisongpos",  S(MIDISONGPOS),0,  "kk",   "", NULL, midi_song_position, NULL },
 
   { "midichn",  S(MIDICHN),0,     "i",    "",      midichn, NULL, NULL    },
   { "pgmassign",S(PGMASSIGN),0,   "",     "iio",   pgmassign, NULL, NULL  },

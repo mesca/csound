@@ -307,6 +307,19 @@ if(BUILD_TESTS)
         target_compile_definitions(unittests PRIVATE CSOUND_TEST_PMIDI)
     endif()
 
+    if(TARGET rtalsa)
+        # The ALSA raw MIDI and devfile readers on bytes the test gives
+        # them: its fixture links ALSA, and opens no device. ALSA's
+        # imported target is InOut's alone, so it is found again here.
+        find_package(ALSA REQUIRED)
+        target_sources(unittests PRIVATE rtalsa_midi_test.cpp
+                                         fixtures/rtalsa_test_module.c)
+        set_source_files_properties(fixtures/rtalsa_test_module.c PROPERTIES
+            INCLUDE_DIRECTORIES $<TARGET_PROPERTY:rtalsa,INCLUDE_DIRECTORIES>)
+        target_link_libraries(unittests PRIVATE ALSA::ALSA)
+        target_compile_definitions(unittests PRIVATE CSOUND_TEST_RTALSA)
+    endif()
+
     include(GoogleTest)
     gtest_discover_tests(unittests)
     if(NOT MSVC OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")

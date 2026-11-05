@@ -102,6 +102,11 @@ typedef struct {
 
 typedef struct {
     OPDS    h;
+    cs_float   *heard, *position;
+} MIDISONGPOS;
+
+typedef struct {
+    OPDS    h;
     cs_float   *r, *ilo, *ihi;
 } MIDIMAP;
 
@@ -232,4 +237,5 @@ int32_t midi_stop(CSOUND *csound, void *p);
 int32_t midi_start(CSOUND *csound, void *p);
 int32_t midi_continue(CSOUND *csound, void *p);
 int32_t midi_clock_freq(CSOUND *csound, void *p);
+int32_t midi_song_position(CSOUND *csound, void *p);
 #endif

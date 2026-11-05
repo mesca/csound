@@ -352,8 +352,11 @@ void m_chanmsg(CSOUND *csound, MEVENT *mep)
       break;
     case SYSTEM_TYPE:           /* sys_common 1-3 only:  chan contains which */
       switch(mep->chan) {
+      case 2:                   /* song position, in sixteenths */
+        csound->midiGlobals->songPosition = mep->dat1 | (mep->dat2 << 7);
+        csound->midiGlobals->songPositionHeard = 1;
+        break;
       case 1:
-      case 2:
       case 3:
         break;
       default:
@@ -533,6 +536,7 @@ int32_t sens_midi(CSOUND *csound)
             goto nxtchr;
           case 2:                       /* start                */
             csound->midi_start = 1;
+            p->songPosition = 0;        /* a Start plays from the top */
             goto nxtchr;
           case 3:                       /* continue             */
             csound->midi_continue = 1;

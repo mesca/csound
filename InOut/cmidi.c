@@ -146,7 +146,8 @@ static void ReadProc(const MIDIPacketList *pktlist, void *refcon, void *srcConnR
         j++;
         continue;
       }
-      nb = datbyts[(st - 0x80) >> 4] + 1;
+      /* a song position has two data bytes */
+      nb = (st == 0xF2) ? 3 : datbyts[(st - 0x80) >> 4] + 1;
       if (j + (UInt32) nb > packet->length) break;
       mdata[*p].status = (Byte) st;
       mdata[*p].data1 = (nb > 1) ? curpack[1] : 0;
@@ -370,13 +371,15 @@ static int32_t MidiDataRead(CSOUND *csound, void *userData,
     if (st < 0x80) goto next;
 
     if (st >= 0xF0 &&
-        !(st == 0xF8 || st == 0xFA || st == 0xFB ||
+        !(st == 0xF2 || st == 0xF8 || st == 0xFA || st == 0xFB ||
           st == 0xFC || st == 0xFF)) goto next;
 
     {
-      /* status-only messages (e.g. real-time clock) carry no port byte */
-      int32_t nd = datbyts[(st - 0x80) >> 4];
-      int32_t len = nd + 1 + ((map && nd > 0) ? 1 : 0);
+      /* a song position has two data bytes; status-only messages (e.g.
+         real-time clock) and system ones carry no port byte */
+      int32_t nd = (st == 0xF2) ? 2 : datbyts[(st - 0x80) >> 4];
+      int32_t ported = (map && nd > 0 && st < 0xF0) ? 1 : 0;
+      int32_t len = nd + 1 + ported;
 
       nbytes -= len;
       if (nbytes < 0) break;
@@ -390,12 +393,12 @@ static int32_t MidiDataRead(CSOUND *csound, void *userData,
       case 1:
         *mbuf++ = (unsigned char) st;
         /* when mapping, a port byte (0x80 | port) follows the status */
-        if (map) *mbuf++ = (unsigned char) (0x80 | port);
+        if (ported) *mbuf++ = (unsigned char) (0x80 | port);
         *mbuf++ = (unsigned char) d1;
         break;
       case 2:
         *mbuf++ = (unsigned char) st;
-        if (map) *mbuf++ = (unsigned char) (0x80 | port);
+        if (ported) *mbuf++ = (unsigned char) (0x80 | port);
         *mbuf++ = (unsigned char) d1;
         *mbuf++ = (unsigned char) d2;
         break;

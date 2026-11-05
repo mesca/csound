@@ -150,6 +150,13 @@ static const unsigned char dataBytes[16] = {
     0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 1, 1, 2, 0
 };
 
+/* the data bytes a status takes: a channel message's, or a song
+   position's two */
+static int32_t data_bytes(unsigned char status)
+{
+    return (status == (unsigned char) 0xF2) ? 2 : dataBytes[status >> 4];
+}
+
 static int32_t set_scheduler_priority(CSOUND *csound, int32_t priority)
 {
     struct sched_param p;
@@ -1022,22 +1029,28 @@ static int32_t midi_in_read(CSOUND *csound,
         if (c < (unsigned char) 0x80) {           /* data byte */
           if (dev->datreq <= 0)
             continue;
-          if (dev->datreq == (int32_t) dataBytes[(int32_t) dev->prvStatus >> 4])
+          if (dev->datreq == data_bytes(dev->prvStatus))
             dev->dat1 = c;
           else
             dev->dat2 = c;
           if (--(dev->datreq) != 0)
             continue;
-          dev->datreq = dataBytes[(int32_t) dev->prvStatus >> 4];
+          dev->datreq = data_bytes(dev->prvStatus);
           buf[bufpos] = dev->prvStatus;
           buf[bufpos + 1] = dev->dat1;
           buf[bufpos + 2] = dev->dat2;
           bufpos += (dev->datreq + 1);
+          if (dev->prvStatus >= (unsigned char) 0xF0) {
+            /* a song position keeps no running status, and cancels any */
+            dev->prvStatus = 0;
+            dev->datreq = -1;
+          }
           continue;
         }
-        else if (c < (unsigned char) 0xF0) {      /* channel message */
+        else if (c < (unsigned char) 0xF0 ||      /* channel message */
+                 c == (unsigned char) 0xF2) {     /* or song position */
           dev->prvStatus = c;
-          dev->datreq = dataBytes[(int32_t) c >> 4];
+          dev->datreq = data_bytes(c);
           continue;
         }
         if (c < (unsigned char) 0xF4)             /* ignore system messages */
@@ -1219,22 +1232,28 @@ static int32_t midi_in_read_file(CSOUND *csound, void *userData,
       if (c < (unsigned char) 0x80) {           /* data byte */
         if (dev->datreq <= 0)
           continue;
-        if (dev->datreq == (int32_t) dataBytes[(int32_t) dev->prvStatus >> 4])
+        if (dev->datreq == data_bytes(dev->prvStatus))
           dev->dat1 = c;
         else
           dev->dat2 = c;
         if (--(dev->datreq) != 0)
           continue;
-        dev->datreq = dataBytes[(int32_t) dev->prvStatus >> 4];
+        dev->datreq = data_bytes(dev->prvStatus);
         buf[bufpos] = dev->prvStatus;
         buf[bufpos + 1] = dev->dat1;
         buf[bufpos + 2] = dev->dat2;
         bufpos += (dev->datreq + 1);
+        if (dev->prvStatus >= (unsigned char) 0xF0) {
+          /* a song position keeps no running status, and cancels any */
+          dev->prvStatus = 0;
+          dev->datreq = -1;
+        }
         continue;
       }
-      else if (c < (unsigned char) 0xF0) {      /* channel message */
+      else if (c < (unsigned char) 0xF0 ||      /* channel message */
+               c == (unsigned char) 0xF2) {     /* or song position */
         dev->prvStatus = c;
-        dev->datreq = dataBytes[(int32_t) c >> 4];
+        dev->datreq = data_bytes(c);
         continue;
       }
       if (c < (unsigned char) 0xF4)             /* ignore system messages */

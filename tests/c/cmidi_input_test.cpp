@@ -2,7 +2,8 @@
   cmidi_input_test.cpp:
 
   Unit test for the CoreMIDI input plugin (InOut/cmidi.c): multiport
-  mapping, a source opened by its number, and the devices it refuses.
+  mapping, a source opened by its number, a song position, and the devices
+  it refuses.
 
   It creates its own virtual CoreMIDI sources, so no physical MIDI hardware
   or external device is required, then drives Csound through the "coremidi"
@@ -32,7 +33,8 @@
 
 namespace {
 
-/* Reports the channel of each message midiin reads in "chan". */
+/* Reports the channel of each message midiin reads in "chan", and the
+   position of each Song Position Pointer midisongpos reads in "songpos". */
 const char *const kOrc = R"(
     sr = 48000
     ksmps = 16
@@ -44,6 +46,12 @@ const char *const kOrc = R"(
     instr 2
       kst, kch, kd1, kd2 midiin
       chnset kch, "chan"
+    endin
+    instr 3
+      kheard, kposition midisongpos
+      if kheard == 1 then
+        chnset kposition, "songpos"
+      endif
     endin
   )";
 
@@ -109,16 +117,22 @@ class CoreMidiInputTests : public ::testing::Test {
       MIDIClientDispose(client);
   }
 
-  static void sendNote(MIDIEndpointRef source, unsigned char status,
-                       unsigned char data1, unsigned char data2) {
+  /* `count` bytes in one packet, as a device sends several messages. */
+  static void sendBytes(MIDIEndpointRef source, const unsigned char *bytes,
+                        unsigned long count) {
     Byte buffer[64];
     MIDIPacketList *packetList = reinterpret_cast<MIDIPacketList *>(buffer);
     MIDIPacket *packet = MIDIPacketListInit(packetList);
-    unsigned char message[3] = {status, data1, data2};
-    packet = MIDIPacketListAdd(packetList, sizeof(buffer), packet, 0, 3,
-                               message);
+    packet = MIDIPacketListAdd(packetList, sizeof(buffer), packet, 0, count,
+                               bytes);
     ASSERT_NE(packet, nullptr);
     MIDIReceived(source, packetList);
+  }
+
+  static void sendNote(MIDIEndpointRef source, unsigned char status,
+                       unsigned char data1, unsigned char data2) {
+    const unsigned char message[3] = {status, data1, data2};
+    sendBytes(source, message, 3);
   }
 
   int channel() {
@@ -132,6 +146,10 @@ class CoreMidiInputTests : public ::testing::Test {
       ASSERT_EQ(csoundPerformKsmps(csound), 0);
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+  }
+
+  int songPosition() {
+    return static_cast<int>(csoundGetControlChannel(csound, "songpos", nullptr));
   }
 
   /* True, with the coremidi module chosen, if `csound` has it. */
@@ -229,6 +247,40 @@ TEST_F(CoreMidiInputTests, OpensASourceByItsNumber) {
   sendNote(sources[1 - opened], 0x91, 62, 100);
   performUntil(2);
   EXPECT_EQ(channel(), 1);
+#endif
+}
+
+TEST_F(CoreMidiInputTests, ReadsASongPosition) {
+#if !defined(CSOUND_TEST_COREMIDI_PLUGIN_DIR)
+  GTEST_SKIP() << "The coremidi plugin is not built";
+#else
+  if (sourceIndex(sources[0]) < 0)
+    GTEST_SKIP() << "virtual CoreMIDI sources are not visible";
+
+  csound = csoundCreate(nullptr, nullptr);
+  ASSERT_NE(csound, nullptr);
+  csoundCreateMessageBuffer(csound, 0);
+  if (!useCoreMidi())
+    GTEST_SKIP() << "The coremidi module is not available";
+
+  /* Port-mapped, where a port byte follows a channel message's status and
+     must not follow a song position's. */
+  ASSERT_EQ(csoundSetOption(csound, "-n"), 0);
+  ASSERT_EQ(csoundSetOption(csound, "-Mm"), 0);
+  ASSERT_EQ(csoundCompileOrc(csound, kOrc, 0), 0);
+  csoundEventString(csound, "i3 0 10\n", 0);
+  ASSERT_EQ(csoundStart(csound), 0);
+
+  /* A note, a song position at sixteenth 144 - 0x10 and 0x01, least
+     significant first - and a clock, in one packet: read as one byte, the
+     song position's data were taken for stray bytes. */
+  const unsigned char packet[] = {0x90, 60, 100, 0xF2, 0x10, 0x01, 0xF8};
+  sendBytes(sources[0], packet, sizeof(packet));
+  for (int i = 0; i < 100 && songPosition() != 144; i++) {
+    ASSERT_EQ(csoundPerformKsmps(csound), 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_EQ(songPosition(), 144);
 #endif
 }
 

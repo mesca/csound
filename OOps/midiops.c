@@ -162,6 +162,15 @@ int32_t midi_continue(CSOUND *csound, void *pp) {
   return OK;
 }
 
+/* 1 on a k-cycle a Song Position Pointer came, and the last one's position,
+   in sixteenths: MIDI beats, six clocks each. */
+int32_t midi_song_position(CSOUND *csound, void *pp) {
+  MIDISONGPOS *p = (MIDISONGPOS *) pp;
+  *p->heard = (cs_float) csound->midiGlobals->songPositionHeard;
+  *p->position = (cs_float) csound->midiGlobals->songPosition;
+  return OK;
+}
+
 
 int32_t midi_clock_freq(CSOUND *csound, void *pp) {
    MIDIKMB * p = ((MIDIKMB *)pp);

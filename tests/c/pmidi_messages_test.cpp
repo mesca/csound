@@ -10,7 +10,10 @@
   its start. An output device's number out of range is an error, as an
   input's is: it opened nothing, and said nothing. And no device name opens
   the default device: the module read the name it had just found missing.
-  Under 'm', a message for an output's port reaches that output alone.
+  Under 'm', a message for an output's port reaches that output alone. And
+  a song position read from an input comes with its two data bytes, and
+  under 'm' with no port byte, which only a channel message takes: it was
+  dropped.
 
   The module runs on stand-in PortMidi functions
   (fixtures/pmidi_test_module.c), so no MIDI hardware is required.
@@ -36,6 +39,8 @@ int32_t csound_test_pmidi_open_output(CSOUND *, void **, const char *);
 int32_t csound_test_pmidi_close_output(CSOUND *, void *);
 int32_t csound_test_pmidi_write(CSOUND *, void *, int32_t,
                                 const unsigned char *, int32_t);
+void csound_test_pmidi_queue(int, int, int, int);
+int32_t csound_test_pmidi_read(CSOUND *, void *, unsigned char *, int32_t);
 extern int csound_test_pmidi_no_devices;
 extern int csound_test_pmidi_writes[4];
 }
@@ -54,6 +59,7 @@ class PortMidiMessageTests : public ::testing::Test {
 
   void TearDown() override {
     csound_test_pmidi_no_devices = 0;
+    csound_test_pmidi_queue(-1, 0, 0, 0);
     std::fill(std::begin(csound_test_pmidi_writes),
               std::end(csound_test_pmidi_writes), 0);
     if (csound != nullptr) {
@@ -162,6 +168,29 @@ TEST_F(PortMidiMessageTests, MappedOutputsWriteToTheirOwnPortAlone) {
   EXPECT_EQ(csound_test_pmidi_writes[2], 1);
   EXPECT_EQ(csound_test_pmidi_writes[3], 1);
   EXPECT_EQ(csound_test_pmidi_close_output(csound, data), 0);
+}
+
+TEST_F(PortMidiMessageTests, ASongPositionIsReadWithItsDataAndNoPortByte) {
+  // Pads, the second input, port 1 under 'm': a note, a song position at
+  // sixteenth 144 and a clock.
+  const std::basic_string<unsigned char> mapped = {
+      0x90, 0x81, 60, 100, 0xF2, 0x10, 0x01, 0xF8};
+  const std::basic_string<unsigned char> plain = {
+      0x90, 60, 100, 0xF2, 0x10, 0x01, 0xF8};
+  for (const char *dev : {"m", "1"}) {
+    void *data = nullptr;
+    ASSERT_EQ(csound_test_pmidi_open_input(csound, &data, dev), 0) << dev;
+    csound_test_pmidi_queue(1, 0x90, 60, 100);
+    csound_test_pmidi_queue(1, 0xF2, 0x10, 0x01);
+    csound_test_pmidi_queue(1, 0xF8, 0, 0);
+    unsigned char mbuf[64];
+    int32_t n = csound_test_pmidi_read(csound, data, mbuf, sizeof(mbuf));
+    ASSERT_GE(n, 0) << dev;
+    EXPECT_EQ(std::basic_string<unsigned char>(mbuf, n),
+              *dev == 'm' ? mapped : plain) << dev;
+    EXPECT_EQ(csound_test_pmidi_close_input(csound, data), 0) << dev;
+    csound_test_pmidi_queue(-1, 0, 0, 0);
+  }
 }
 
 TEST_F(PortMidiMessageTests, AllOrMappedDevicesOpenNoneWithNoDevice) {

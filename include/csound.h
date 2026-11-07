@@ -1112,6 +1112,8 @@ extern "C" {
    * the channel, so do nothing slow while holding it, and allocate outside it.
    * csoundGetStringChannel() takes the lock itself, so it cannot be called
    * between csoundLockChannel() and csoundUnlockChannel().
+   * The lock does not cover a variable exported with chnexport: the orchestra
+   * assigns to it without taking the lock.
    */
   PUBLIC void csoundGetStringChannel(CSOUND *csound,
                                      const char *name, char *string);

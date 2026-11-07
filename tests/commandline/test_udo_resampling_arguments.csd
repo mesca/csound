@@ -70,7 +70,7 @@ instr CheckRates
   endif
 
   kExpectedCycles = timeinstk()*iFactor
-  ; Count inside each UDO; returned k-signals also pass through a converter.
+  ; Count inside each UDO.
   kClassicCycles = gkClassicCycles-iClassicStart
   kModernCycles = gkModernCycles-iModernStart
   if kClassicCycles != kExpectedCycles || kModernCycles != kExpectedCycles then

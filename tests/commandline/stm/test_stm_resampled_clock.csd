@@ -42,8 +42,7 @@ body_writer@global:i = build_runner()
 oversampled_writer@global:i = build_runner()
 undersampled_writer@global:i = build_runner()
 
-; k outputs of a resampled UDO pass through a sample-rate converter, so
-; the readers report through globals instead
+; the readers report through globals
 read_time@global:k = 0
 read_node_time@global:k = 0
 

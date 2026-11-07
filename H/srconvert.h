@@ -65,8 +65,8 @@ void src_deinit(CSOUND *csound, SR_CONVERTER *p);
     in - signal to be converted
     out - signal to be converted
 
-    src is only performed on time-domain signals (a,k and arrays thereof)
-    other variable types are simply copied
+    src is only performed on audio signals (a and arrays thereof)
+    other variable types, k included, are simply copied
  */
 int32_t src_convert(CSOUND *csoubnd, SR_CONVERTER *p, cs_float *in, cs_float *out);
 

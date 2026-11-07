@@ -4,8 +4,8 @@
 
 Some signal processes need a different sample rate from the rest of an
 instrument. Csound 7 lets a user-defined opcode (UDO) change its local rate
-with `oversample` or `undersample`. The engine converts signals at the UDO
-inputs and outputs.
+with `oversample` or `undersample`. The engine converts audio signals at
+the UDO inputs and outputs.
 
 This gives a filter or oscillator a local rate without a change to the
 whole orchestra. The converter choice affects both the signal and the
@@ -66,6 +66,11 @@ different quality and cost. These converters add latency.
 Settings `3` and `4` select zero-order hold and linear conversion.
 The output converter defaults to the input converter.
 Builds without libsamplerate use linear conversion for all converter settings.
+
+Converters apply to audio only. As with `setksmps`, a k-rate argument is copied
+in at each local control cycle, so it holds the parent's value through them,
+and a k-rate output returns its value from the last of them. To resample a
+control as a signal, pass it at a-rate.
 
 Use positive integer factors. A factor of `1` leaves the rate unchanged.
 Place rate setup before signal processing in the UDO.

@@ -32,7 +32,8 @@
 // Downwards: an input of size N is taken and N/ratio
 // samples are output.
 // With different block sizes (undersample), convert one whole block per call.
-// The control rate stays unchanged in that case.
+// Only audio is converted: a k value is copied like any other argument, as it
+// is across a local ksmps, so it is neither late nor filtered.
 // Basic linear converter
 static SR_CONVERTER *src_linear_init(CSOUND *csound, int32_t mode,
                                      float ratio, CS_VARIABLE *var,
@@ -60,13 +61,12 @@ static SR_CONVERTER *src_linear_init(CSOUND *csound, int32_t mode,
     return NULL;
   }
   
-  if(typ == &CS_VAR_TYPE_A ||
-     (typ == &CS_VAR_TYPE_K && in_ksmps == out_ksmps)) {
-    size = typ == &CS_VAR_TYPE_K ? 1 : in_ksmps;
+  if(typ == &CS_VAR_TYPE_A) {
+    size = in_ksmps;
     pp->insize = size;
-    pp->outsize = typ == &CS_VAR_TYPE_K ? 1 : out_ksmps;
+    pp->outsize = out_ksmps;
     pp->dat = (CVTDAT *) csound->Calloc(csound, sizeof(CVTDAT)*n);
-    for(i = 0; i < n; i++) { // one cvt per array item or per asig/ksig var
+    for(i = 0; i < n; i++) { // one cvt per array item or per asig var
       pp->dat[i].data = csound->Calloc(csound, sizeof(cs_float));
       if (pp->insize == pp->outsize)
         pp->dat[i].bufferin =
@@ -209,7 +209,6 @@ typedef struct {
     SRC_ZERO_ORDER_HOLD         = 3,
     SRC_LINEAR                  = 4
     NB - linear uses the code above, avoiding extra copying
-    and implementing ksig conversion correctly
     (SRC linear converter has a bug for single-sample conversion)
 */
 SR_CONVERTER *src_init(CSOUND *csound, int32_t mode,
@@ -237,14 +236,13 @@ SR_CONVERTER *src_init(CSOUND *csound, int32_t mode,
       return NULL;
     }
     
-    if(typ == &CS_VAR_TYPE_A ||
-       (typ == &CS_VAR_TYPE_K && in_ksmps == out_ksmps)) {
+    if(typ == &CS_VAR_TYPE_A) {
       // src conversion
-      size = typ == &CS_VAR_TYPE_K ? 1 : in_ksmps;
+      size = in_ksmps;
       pp->dat = (CVTDAT *) csound->Calloc(csound, sizeof(CVTDAT)*n);
       pp->insize = size;
-      pp->outsize = typ == &CS_VAR_TYPE_K ? 1 : out_ksmps;
-      for(i = 0; i < n; i++) { // one cvt per array item or per asig/ksig var
+      pp->outsize = out_ksmps;
+      for(i = 0; i < n; i++) { // one cvt per array item or per asig var
         SRC_STATE* stat = src_new(mode > 0 ? mode : 0, 1, &err);
         if(!err) {
           SRC *p = (SRC *) csound->Calloc(csound, sizeof(SRC));

@@ -2473,7 +2473,7 @@ static int32_t set_inbufs(CSOUND *csound,
           csound, Str("could not prepare UDO input\n"));
       }
     }
-    // set up src units one per input arg - non k/a sigs/arrays are bypassed
+    // set up src units one per input arg - non a sigs/arrays are bypassed
     if(esr != parent_sr) {
         if (udo->cvt_in == NULL)
           udo->cvt_in = (SR_CONVERTER **) csound->Calloc(
@@ -2542,7 +2542,7 @@ int32_t xoutset(CSOUND *csound, XOUT *p)
         if (udo->cvt_out == NULL)
           udo->cvt_out = (SR_CONVERTER **) csound->Calloc(
             csound, OPCODENUMOUTS_MAX * sizeof(SR_CONVERTER *));
-        // set up src units one per input arg - non k/a sigs/arrays are bypassed
+        // set up src units one per output arg - non a sigs/arrays are bypassed
         if((udo->cvt_out[i] = src_init(csound, p->h.insdshead->out_cvt,
                                          parent_sr/CS_ESR, current,
                                          p->h.insdshead, CS_KSMPS,
@@ -3039,7 +3039,11 @@ int32_t useropcd_pass_by_copy(CSOUND *csound, UOPCODE *p)
             }
           }
         }
-        else { // under/oversampling
+        /* A k value leaves with the last local cycle, as from a local ksmps:
+           an output that is also an input must not change under the cycles
+           still to run. */
+        else if ((current->varType != &CS_VAR_TYPE_K &&
+                  current->subType != &CS_VAR_TYPE_K) || ocnt == os - 1) {
           void* in = (void*)internal_ptrs[i];
           void* out = (void*)external_ptrs[i];
           if (UNLIKELY(src_convert(csound, p->cvt_out[cvt], in, out) != OK))

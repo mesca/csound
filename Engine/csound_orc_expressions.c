@@ -1840,17 +1840,20 @@ static int32_t struct_member_value_is_number(const char* valueType)
 }
 
 /* What a member write does with a value of a type. Its member type's
-   copier takes it as it is when it is a number for a number, a boolean
-   for a boolean (b, B), which holds an int32_t, an a for an a, an S for
-   an S, an array for an array, whose copier checks it, and anything for
-   another member type. Any other value is assigned to a temporary of
-   the member's type first, and refused for an array member, which `=`
-   would fill instead, but an audio value into a one-dimensional k[],
-   which `=` makes an array of its block, as kArr = aSig. */
-static int32_t struct_member_value_rule(const CS_VARIABLE* member,
+   copier takes it as it is when it is a number for a number, a
+   boolean for a boolean (b, B), which holds an int32_t, a value of its own
+   type for any other scalar, and an array for an array, whose copier
+   checks it. Any other value is assigned to a temporary first, and
+   refused for an f or w member, which `=` makes of nothing else, and for
+   an array member, which `=` would fill instead, but an audio value into
+   a one-dimensional k[], which `=` makes an array of its block, as
+   kArr = aSig. */
+static int32_t struct_member_value_rule(CSOUND* csound,
+                                        const CS_VARIABLE* member,
                                         const char* valueType)
 {
   const CS_TYPE* memberType = member->varType;
+  char* name;
   int32_t own;
 
   if (memberType == &CS_VAR_TYPE_ARRAY) {
@@ -1865,13 +1868,14 @@ static int32_t struct_member_value_rule(const CS_VARIABLE* member,
   else if (memberType == &CS_VAR_TYPE_B || memberType == &CS_VAR_TYPE_b) {
     own = !strcmp(valueType, "B") || !strcmp(valueType, "b");
   }
-  else if (memberType == &CS_VAR_TYPE_A || memberType == &CS_VAR_TYPE_S) {
-    own = !strcmp(valueType, memberType->varTypeName);
-  }
   else {
-    return MEMBER_TAKES_VALUE;
+    name = remove_type_quoting(csound, valueType);
+    own = !strcmp(name, memberType->varTypeName);
+    csound->Free(csound, name);
   }
-  return own ? MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
+  return own ? MEMBER_TAKES_VALUE :
+    memberType == &CS_VAR_TYPE_F || memberType == &CS_VAR_TYPE_W ?
+    MEMBER_REFUSES_VALUE : MEMBER_CONVERTS_VALUE;
 }
 
 /* The type of the temporary a value goes through into a member: one the
@@ -1925,16 +1929,16 @@ static int32_t struct_member_function_gives(CSOUND* csound, TREE* call,
    value, is copied by the member type's copier, which takes it for a
    value of that type: an a member's copies a whole block from it, an S
    member's a string, which a number is not, an array member's an array,
-   and a boolean member's the first four bytes of a number.
-   A value of another type is assigned to a temporary of the member's type
-   before the write, as it would be to a variable of that type: aSig =
-   kVal converts it to a block, aSig = linseg(...) calls linseg's audio
-   form, and what `=` cannot convert is refused. It is refused here for an
-   array member, which `=` would fill instead (the temporary has no
-   elements, where kArr = kVal fills the array's). Called on a verified
-   write: 0 when the value is refused, else the assignment, or NULL when
-   the value needs none, is put in *assignment, and the write takes its
-   temporary. */
+   and a boolean member's the first four bytes of a number. A value of
+   another type is assigned to a temporary of the member's type before the
+   write, as it would be to a variable of that type: aSig = kVal converts
+   it to a block, aSig = linseg(...) calls linseg's audio form, and what
+   `=` cannot convert is refused. It is refused here for an array member,
+   which `=` would fill instead (the temporary has no elements, where
+   kArr = kVal fills the array's), and for an f or w member
+   (struct_member_value_rule). Called on a verified write: 0 when the
+   value is refused, else the assignment, or NULL when the value needs
+   none, is put in *assignment, and the write takes its temporary. */
 int32_t struct_member_value_conversion(CSOUND* csound, TREE* write,
                                        TYPE_TABLE* typeTable,
                                        TREE** assignment)
@@ -1988,7 +1992,7 @@ int32_t struct_member_value_conversion(CSOUND* csound, TREE* write,
       (valueType = get_arg_type2(csound, *value, typeTable)) == NULL) {
     return 1;
   }
-  rule = struct_member_value_rule(member, valueType);
+  rule = struct_member_value_rule(csound, member, valueType);
   if (rule == MEMBER_REFUSES_VALUE) {
     int32_t array = member->varType == &CS_VAR_TYPE_ARRAY;
     char* got = csoundFormatTypeName(csound, valueType, 0);

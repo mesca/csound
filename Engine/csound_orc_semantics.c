@@ -4971,6 +4971,20 @@ TREE* verify_tree(CSOUND * csound, TREE *root, TYPE_TABLE* typeTable)
       if(!verify_opcode(csound, current, typeTable)) {
         return 0;
       }
+      {
+        /* a member write's value of another type than the member's goes
+           to a temporary of the member's type first */
+        TREE* conversion =
+          struct_member_value_conversion(csound, current, typeTable);
+        if (conversion != NULL) {
+          conversion->next = current;
+          current = conversion;
+          if (previous != NULL) {
+            previous->next = current;
+          }
+          continue;
+        }
+      }
       if (is_statement_expansion_required(current)) {
         current = expand_statement(csound, current, typeTable);
         if (current == NULL) {

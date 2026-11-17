@@ -64,6 +64,8 @@ int32_t tree_has_k_rate_array_index(CSOUND* csound, TREE* tree,
 TREE* convert_break_to_goto(CSOUND* csound, LOOP_JUMP_TARGETS* targets);
 TREE* convert_continue_to_goto(CSOUND* csound, LOOP_JUMP_TARGETS* targets);
 int expand_struct_array_member_assignment(CSOUND* csound, TREE* current, TYPE_TABLE* typeTable, TREE** anchor);
+TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
+                                     TYPE_TABLE* typeTable);
 TREE* expand_struct_array_member_read(CSOUND* csound, TREE* structExpr,
                                       int32_t line, uint64_t locn,
                                       TYPE_TABLE* typeTable,

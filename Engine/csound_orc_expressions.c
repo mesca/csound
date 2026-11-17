@@ -1776,6 +1776,16 @@ static TREE* create_struct_array_member_set_call(
   return setOp;
 }
 
+/* An assignment statement, left = right, as the parser makes one. */
+static TREE* create_assignment(CSOUND* csound, int32_t line, uint64_t locn,
+                               TREE* left, TREE* right)
+{
+  TREE* assignment = make_node(csound, line, locn, T_ASSIGNMENT, left, right);
+  assignment->value = make_token(csound, "=", NULL);
+  assignment->value->type = T_ASSIGNMENT;
+  return assignment;
+}
+
 static TREE* create_struct_member_assignment(CSOUND* csound,
                                              TREE* current,
                                              const char* structArg,
@@ -1789,11 +1799,161 @@ static TREE* create_struct_member_assignment(CSOUND* csound,
                        create_ident_leaf(csound, current->line, current->locn,
                                           path->memberVars[i]->varName));
   }
-  TREE* assignment = make_node(csound, current->line, current->locn,
-                                T_ASSIGNMENT, member,
-                                copy_node(csound, current->right));
-  assignment->value = make_token(csound, "=", NULL);
-  assignment->value->type = T_ASSIGNMENT;
+  return create_assignment(csound, current->line, current->locn, member,
+                           copy_node(csound, current->right));
+}
+
+/* The member at an index of a struct type's members, or NULL. */
+static const CS_VARIABLE* struct_type_member(const CS_TYPE* type,
+                                             const TREE* index)
+{
+  CONS_CELL* cell;
+  int32_t i;
+
+  if (type == NULL || !type->userDefinedType || index == NULL ||
+      index->type != INTEGER_TOKEN || index->value == NULL) {
+    return NULL;
+  }
+  cell = type->members;
+  for (i = index->value->value; cell != NULL && i > 0; i--) {
+    cell = cell->next;
+  }
+  return cell != NULL ? (const CS_VARIABLE*)cell->value : NULL;
+}
+
+enum { MEMBER_TAKES_VALUE, MEMBER_CONVERTS_VALUE };
+
+/* What a member write does with a value of a type. Its member type's
+   copier takes it as it is when it is an a for an a, and anything for
+   another member type. Any other value is assigned to a temporary of the
+   member's type first. */
+static int32_t struct_member_value_rule(const CS_VARIABLE* member,
+                                        const char* valueType)
+{
+  const CS_TYPE* memberType = member->varType;
+
+  if (memberType == &CS_VAR_TYPE_A) {
+    return !strcmp(valueType, memberType->varTypeName) ?
+      MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
+  }
+  return MEMBER_TAKES_VALUE;
+}
+
+/* Whether a function called without a type of its own, f(...), has a
+   form giving a value of a type: `=` into a variable of that type calls
+   that form. */
+static int32_t struct_member_function_gives(CSOUND* csound, TREE* call,
+                                            const char* type,
+                                            TYPE_TABLE* typeTable)
+{
+  char* inArgs;
+  int32_t gives;
+
+  if (call->value == NULL || call->value->optype != NULL ||
+      type[0] == '\0' || type[1] != '\0') {
+    return 0;
+  }
+  inArgs = get_arg_string_from_tree(csound, call->right, typeTable);
+  gives = find_opcode_new(csound, call->value->lexeme, (char*)type,
+                          inArgs != NULL ? inArgs : "") != NULL;
+  if (inArgs != NULL) {
+    csound->Free(csound, inArgs);
+  }
+  return gives;
+}
+
+/* The value of a member write, ##array_member_set array, value, depth,
+   member indexes..., indexes... or ##member_set struct, member index,
+   value, is copied by the member type's copier, which takes it for a
+   value of that type: an a member's copies a whole block from it.
+   A value of another type is assigned to a temporary of the member's type
+   before the write, as it would be to a variable of that type: aSig =
+   kVal converts it to a block, aSig = linseg(...) calls linseg's audio
+   form, and what `=` cannot convert is refused. Called on a verified
+   write: the assignment is returned, and the write takes its temporary,
+   or NULL when the value needs none. */
+TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
+                                     TYPE_TABLE* typeTable)
+{
+  const CS_VARIABLE *target, *member = NULL;
+  TREE **value, *arg, *rest, *assignment = NULL;
+  char *valueType, *name;
+  int32_t inPlace;
+
+  if (write == NULL || write->type != T_OPCALL || write->value == NULL ||
+      (!(inPlace = !strcmp(write->value->lexeme, "##array_member_set")) &&
+       strcmp(write->value->lexeme, "##member_set") != 0) ||
+      write->right == NULL || write->right->type != T_IDENT ||
+      write->right->next == NULL ||
+      (target = find_var_from_pools(csound, write->right->value->lexeme,
+                                    write->right->value->lexeme,
+                                    typeTable)) == NULL) {
+    return NULL;
+  }
+  if (inPlace) {
+    const CS_TYPE* type = target->varType == &CS_VAR_TYPE_ARRAY ?
+      target->subType : NULL;
+    int32_t depth;
+
+    value = &write->right->next;
+    arg = (*value)->next;
+    if (arg == NULL || arg->type != INTEGER_TOKEN) {
+      return NULL;
+    }
+    for (depth = arg->value->value; depth > 0; depth--) {
+      arg = arg->next;
+      if ((member = struct_type_member(type, arg)) == NULL) {
+        return NULL;
+      }
+      type = member->varType;
+    }
+  }
+  else {
+    arg = write->right->next;
+    member = struct_type_member(target->varType, arg);
+    if (member == NULL || arg->next == NULL || arg->next->next != NULL) {
+      return NULL;
+    }
+    value = &arg->next;
+  }
+  /* a struct member's copier checks the struct it is given, and a
+     temporary is what a value was converted to */
+  if (member == NULL || member->varType->userDefinedType ||
+      ((*value)->type == T_IDENT && (*value)->value->lexeme[0] == '#') ||
+      (valueType = get_arg_type2(csound, *value, typeTable)) == NULL) {
+    return NULL;
+  }
+  if (struct_member_value_rule(member, valueType) ==
+      MEMBER_CONVERTS_VALUE) {
+    char* type = (char*)member->varType->varTypeName;
+
+    name = create_out_arg(csound, type, typeTable->localPool->synthArgCount++,
+                          typeTable);
+    rest = (*value)->next;
+    (*value)->next = NULL;
+    if ((*value)->type != T_FUNCTION ||
+        struct_member_function_gives(csound, *value, type, typeTable)) {
+      /* an assignment, as the statement is written, so a function in the
+         value is called in its form for the temporary, as for
+         aSig = linseg(...) */
+      assignment = create_assignment(csound, write->line, write->locn,
+                                     create_ans_token(csound, name), *value);
+    }
+    else {
+      /* a function with no such form, or written with a type of its own,
+         f:a(...), is called in the form it is typed by, and `=` converts
+         what it gives, as for kVal = tone(aSig, 1000) * 1 */
+      assignment = create_opcode_token(csound, "=");
+      assignment->left = create_ans_token(csound, name);
+      assignment->right = *value;
+      assignment->line = write->line;
+      assignment->locn = write->locn;
+    }
+    *value = create_ans_token(csound, name);
+    (*value)->next = rest;
+    csound->Free(csound, name);
+  }
+  csound->Free(csound, valueType);
   return assignment;
 }
 

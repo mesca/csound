@@ -1823,17 +1823,35 @@ static const CS_VARIABLE* struct_type_member(const CS_TYPE* type,
 
 enum { MEMBER_TAKES_VALUE, MEMBER_CONVERTS_VALUE, MEMBER_REFUSES_VALUE };
 
+/* Whether a member type holds a number: i, k, and p, r or c, which a
+   member written without a type takes from its name's first letter. */
+static int32_t struct_member_holds_number(const CS_TYPE* memberType)
+{
+  return memberType == &CS_VAR_TYPE_I || memberType == &CS_VAR_TYPE_K ||
+    memberType == &CS_VAR_TYPE_P || memberType == &CS_VAR_TYPE_R ||
+    memberType == &CS_VAR_TYPE_C;
+}
+
+/* Whether a value's type is a number's: i, k, c, p or r. */
+static int32_t struct_member_value_is_number(const char* valueType)
+{
+  return valueType[0] != '\0' && valueType[1] == '\0' &&
+    strchr("ikcpr", valueType[0]) != NULL;
+}
+
 /* What a member write does with a value of a type. Its member type's
-   copier takes it as it is when it is an a for an a, an S for an S, an
-   array for an array, whose copier checks it, and anything for another
-   member type. Any other value is assigned to a temporary of the member's
-   type first, and refused for an array member, which `=` would fill
-   instead, but an audio value into a one-dimensional k[], which `=`
-   makes an array of its block, as kArr = aSig. */
+   copier takes it as it is when it is a number for a number, a boolean
+   for a boolean (b, B), which holds an int32_t, an a for an a, an S for
+   an S, an array for an array, whose copier checks it, and anything for
+   another member type. Any other value is assigned to a temporary of
+   the member's type first, and refused for an array member, which `=`
+   would fill instead, but an audio value into a one-dimensional k[],
+   which `=` makes an array of its block, as kArr = aSig. */
 static int32_t struct_member_value_rule(const CS_VARIABLE* member,
                                         const char* valueType)
 {
   const CS_TYPE* memberType = member->varType;
+  int32_t own;
 
   if (memberType == &CS_VAR_TYPE_ARRAY) {
     /* [k] or k[], as an expression's type is spelled */
@@ -1841,11 +1859,42 @@ static int32_t struct_member_value_rule(const CS_VARIABLE* member,
       !strcmp(valueType, "a") && member->subType == &CS_VAR_TYPE_K &&
       member->dimensions <= 1 ? MEMBER_CONVERTS_VALUE : MEMBER_REFUSES_VALUE;
   }
-  if (memberType == &CS_VAR_TYPE_A || memberType == &CS_VAR_TYPE_S) {
-    return !strcmp(valueType, memberType->varTypeName) ?
-      MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
+  if (struct_member_holds_number(memberType)) {
+    own = struct_member_value_is_number(valueType);
   }
-  return MEMBER_TAKES_VALUE;
+  else if (memberType == &CS_VAR_TYPE_B || memberType == &CS_VAR_TYPE_b) {
+    own = !strcmp(valueType, "B") || !strcmp(valueType, "b");
+  }
+  else if (memberType == &CS_VAR_TYPE_A || memberType == &CS_VAR_TYPE_S) {
+    own = !strcmp(valueType, memberType->varTypeName);
+  }
+  else {
+    return MEMBER_TAKES_VALUE;
+  }
+  return own ? MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
+}
+
+/* The type of the temporary a value goes through into a member: one the
+   member takes as it is, so the write is converted once. An a or a B,
+   which `=` makes no i of, goes into a member that holds a number as a
+   k, anything else as an i, and a number into a b member as a B, which
+   `=` makes of a number in each cycle, a number read at a k index too.
+   That is for an i or b member written at a k index, in performance (at
+   i indexes `=` assigns it itself); written through the element's copy
+   at init, as a p, r or c member is at i indexes, a k or a B holds 0. */
+static char* struct_member_temporary_type(const CS_TYPE* memberType,
+                                          const char* valueType)
+{
+  if (memberType == &CS_VAR_TYPE_K) {
+    return "k";
+  }
+  if (struct_member_holds_number(memberType)) {
+    return !strcmp(valueType, "a") || !strcmp(valueType, "B") ? "k" : "i";
+  }
+  if (memberType == &CS_VAR_TYPE_b) {
+    return struct_member_value_is_number(valueType) ? "B" : "b";
+  }
+  return (char*)memberType->varTypeName;
 }
 
 /* Whether a function called without a type of its own, f(...), has a
@@ -1875,7 +1924,8 @@ static int32_t struct_member_function_gives(CSOUND* csound, TREE* call,
    member indexes..., indexes... or ##member_set struct, member index,
    value, is copied by the member type's copier, which takes it for a
    value of that type: an a member's copies a whole block from it, an S
-   member's a string, which a number is not, an array member's an array.
+   member's a string, which a number is not, an array member's an array,
+   and a boolean member's the first four bytes of a number.
    A value of another type is assigned to a temporary of the member's type
    before the write, as it would be to a variable of that type: aSig =
    kVal converts it to a block, aSig = linseg(...) calls linseg's audio
@@ -1961,7 +2011,7 @@ int32_t struct_member_value_conversion(CSOUND* csound, TREE* write,
   else if (rule == MEMBER_CONVERTS_VALUE) {
     /* an array member converts only an audio value into a k[] */
     char* type = member->varType == &CS_VAR_TYPE_ARRAY ? "[k]" :
-      (char*)member->varType->varTypeName;
+      struct_member_temporary_type(member->varType, valueType);
 
     name = create_out_arg(csound, type, typeTable->localPool->synthArgCount++,
                           typeTable);

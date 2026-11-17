@@ -1824,15 +1824,15 @@ static const CS_VARIABLE* struct_type_member(const CS_TYPE* type,
 enum { MEMBER_TAKES_VALUE, MEMBER_CONVERTS_VALUE };
 
 /* What a member write does with a value of a type. Its member type's
-   copier takes it as it is when it is an a for an a, and anything for
-   another member type. Any other value is assigned to a temporary of the
-   member's type first. */
+   copier takes it as it is when it is an a for an a, an S for an S, and
+   anything for another member type. Any other value is assigned to a
+   temporary of the member's type first. */
 static int32_t struct_member_value_rule(const CS_VARIABLE* member,
                                         const char* valueType)
 {
   const CS_TYPE* memberType = member->varType;
 
-  if (memberType == &CS_VAR_TYPE_A) {
+  if (memberType == &CS_VAR_TYPE_A || memberType == &CS_VAR_TYPE_S) {
     return !strcmp(valueType, memberType->varTypeName) ?
       MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
   }
@@ -1865,7 +1865,8 @@ static int32_t struct_member_function_gives(CSOUND* csound, TREE* call,
 /* The value of a member write, ##array_member_set array, value, depth,
    member indexes..., indexes... or ##member_set struct, member index,
    value, is copied by the member type's copier, which takes it for a
-   value of that type: an a member's copies a whole block from it.
+   value of that type: an a member's copies a whole block from it, an S
+   member's a string, which a number is not.
    A value of another type is assigned to a temporary of the member's type
    before the write, as it would be to a variable of that type: aSig =
    kVal converts it to a block, aSig = linseg(...) calls linseg's audio

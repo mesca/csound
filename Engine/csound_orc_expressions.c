@@ -1821,17 +1821,26 @@ static const CS_VARIABLE* struct_type_member(const CS_TYPE* type,
   return cell != NULL ? (const CS_VARIABLE*)cell->value : NULL;
 }
 
-enum { MEMBER_TAKES_VALUE, MEMBER_CONVERTS_VALUE };
+enum { MEMBER_TAKES_VALUE, MEMBER_CONVERTS_VALUE, MEMBER_REFUSES_VALUE };
 
 /* What a member write does with a value of a type. Its member type's
-   copier takes it as it is when it is an a for an a, an S for an S, and
-   anything for another member type. Any other value is assigned to a
-   temporary of the member's type first. */
+   copier takes it as it is when it is an a for an a, an S for an S, an
+   array for an array, whose copier checks it, and anything for another
+   member type. Any other value is assigned to a temporary of the member's
+   type first, and refused for an array member, which `=` would fill
+   instead, but an audio value into a one-dimensional k[], which `=`
+   makes an array of its block, as kArr = aSig. */
 static int32_t struct_member_value_rule(const CS_VARIABLE* member,
                                         const char* valueType)
 {
   const CS_TYPE* memberType = member->varType;
 
+  if (memberType == &CS_VAR_TYPE_ARRAY) {
+    /* [k] or k[], as an expression's type is spelled */
+    return strchr(valueType, '[') != NULL ? MEMBER_TAKES_VALUE :
+      !strcmp(valueType, "a") && member->subType == &CS_VAR_TYPE_K &&
+      member->dimensions <= 1 ? MEMBER_CONVERTS_VALUE : MEMBER_REFUSES_VALUE;
+  }
   if (memberType == &CS_VAR_TYPE_A || memberType == &CS_VAR_TYPE_S) {
     return !strcmp(valueType, memberType->varTypeName) ?
       MEMBER_TAKES_VALUE : MEMBER_CONVERTS_VALUE;
@@ -1866,21 +1875,26 @@ static int32_t struct_member_function_gives(CSOUND* csound, TREE* call,
    member indexes..., indexes... or ##member_set struct, member index,
    value, is copied by the member type's copier, which takes it for a
    value of that type: an a member's copies a whole block from it, an S
-   member's a string, which a number is not.
+   member's a string, which a number is not, an array member's an array.
    A value of another type is assigned to a temporary of the member's type
    before the write, as it would be to a variable of that type: aSig =
    kVal converts it to a block, aSig = linseg(...) calls linseg's audio
-   form, and what `=` cannot convert is refused. Called on a verified
-   write: the assignment is returned, and the write takes its temporary,
-   or NULL when the value needs none. */
-TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
-                                     TYPE_TABLE* typeTable)
+   form, and what `=` cannot convert is refused. It is refused here for an
+   array member, which `=` would fill instead (the temporary has no
+   elements, where kArr = kVal fills the array's). Called on a verified
+   write: 0 when the value is refused, else the assignment, or NULL when
+   the value needs none, is put in *assignment, and the write takes its
+   temporary. */
+int32_t struct_member_value_conversion(CSOUND* csound, TREE* write,
+                                       TYPE_TABLE* typeTable,
+                                       TREE** assignment)
 {
   const CS_VARIABLE *target, *member = NULL;
-  TREE **value, *arg, *rest, *assignment = NULL;
+  TREE **value, *arg, *rest;
   char *valueType, *name;
-  int32_t inPlace;
+  int32_t inPlace, ok = 1, rule;
 
+  *assignment = NULL;
   if (write == NULL || write->type != T_OPCALL || write->value == NULL ||
       (!(inPlace = !strcmp(write->value->lexeme, "##array_member_set")) &&
        strcmp(write->value->lexeme, "##member_set") != 0) ||
@@ -1889,7 +1903,7 @@ TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
       (target = find_var_from_pools(csound, write->right->value->lexeme,
                                     write->right->value->lexeme,
                                     typeTable)) == NULL) {
-    return NULL;
+    return 1;
   }
   if (inPlace) {
     const CS_TYPE* type = target->varType == &CS_VAR_TYPE_ARRAY ?
@@ -1899,12 +1913,12 @@ TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
     value = &write->right->next;
     arg = (*value)->next;
     if (arg == NULL || arg->type != INTEGER_TOKEN) {
-      return NULL;
+      return 1;
     }
     for (depth = arg->value->value; depth > 0; depth--) {
       arg = arg->next;
       if ((member = struct_type_member(type, arg)) == NULL) {
-        return NULL;
+        return 1;
       }
       type = member->varType;
     }
@@ -1913,7 +1927,7 @@ TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
     arg = write->right->next;
     member = struct_type_member(target->varType, arg);
     if (member == NULL || arg->next == NULL || arg->next->next != NULL) {
-      return NULL;
+      return 1;
     }
     value = &arg->next;
   }
@@ -1922,11 +1936,32 @@ TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
   if (member == NULL || member->varType->userDefinedType ||
       ((*value)->type == T_IDENT && (*value)->value->lexeme[0] == '#') ||
       (valueType = get_arg_type2(csound, *value, typeTable)) == NULL) {
-    return NULL;
+    return 1;
   }
-  if (struct_member_value_rule(member, valueType) ==
-      MEMBER_CONVERTS_VALUE) {
-    char* type = (char*)member->varType->varTypeName;
+  rule = struct_member_value_rule(member, valueType);
+  if (rule == MEMBER_REFUSES_VALUE) {
+    int32_t array = member->varType == &CS_VAR_TYPE_ARRAY;
+    char* got = csoundFormatTypeName(csound, valueType, 0);
+    char* want = csoundFormatTypeName(
+      csound, array ? (member->subType != NULL ?
+                       member->subType->varTypeName : NULL) :
+      member->varType->varTypeName,
+      array ? (member->dimensions > 0 ? member->dimensions : 1) : 0);
+
+    synterr(csound, array ?
+            Str("cannot assign %s to %s, an array member of a struct "
+                "array's element, line %d\n") :
+            Str("cannot assign %s to %s, a member of a struct array's "
+                "element, line %d\n"), got, want, write->line);
+    do_baktrace(csound, write->locn);
+    csound->Free(csound, got);
+    csound->Free(csound, want);
+    ok = 0;
+  }
+  else if (rule == MEMBER_CONVERTS_VALUE) {
+    /* an array member converts only an audio value into a k[] */
+    char* type = member->varType == &CS_VAR_TYPE_ARRAY ? "[k]" :
+      (char*)member->varType->varTypeName;
 
     name = create_out_arg(csound, type, typeTable->localPool->synthArgCount++,
                           typeTable);
@@ -1937,25 +1972,25 @@ TREE* struct_member_value_conversion(CSOUND* csound, TREE* write,
       /* an assignment, as the statement is written, so a function in the
          value is called in its form for the temporary, as for
          aSig = linseg(...) */
-      assignment = create_assignment(csound, write->line, write->locn,
-                                     create_ans_token(csound, name), *value);
+      *assignment = create_assignment(csound, write->line, write->locn,
+                                      create_ans_token(csound, name), *value);
     }
     else {
       /* a function with no such form, or written with a type of its own,
          f:a(...), is called in the form it is typed by, and `=` converts
          what it gives, as for kVal = tone(aSig, 1000) * 1 */
-      assignment = create_opcode_token(csound, "=");
-      assignment->left = create_ans_token(csound, name);
-      assignment->right = *value;
-      assignment->line = write->line;
-      assignment->locn = write->locn;
+      *assignment = create_opcode_token(csound, "=");
+      (*assignment)->left = create_ans_token(csound, name);
+      (*assignment)->right = *value;
+      (*assignment)->line = write->line;
+      (*assignment)->locn = write->locn;
     }
     *value = create_ans_token(csound, name);
     (*value)->next = rest;
     csound->Free(csound, name);
   }
   csound->Free(csound, valueType);
-  return assignment;
+  return ok;
 }
 
 int expand_struct_array_member_assignment(CSOUND* csound,

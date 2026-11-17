@@ -4973,9 +4973,12 @@ TREE* verify_tree(CSOUND * csound, TREE *root, TYPE_TABLE* typeTable)
       }
       {
         /* a member write's value of another type than the member's goes
-           to a temporary of the member's type first */
-        TREE* conversion =
-          struct_member_value_conversion(csound, current, typeTable);
+           to a temporary of the member's type first, or is refused */
+        TREE* conversion;
+        if (!struct_member_value_conversion(csound, current, typeTable,
+                                            &conversion)) {
+          return 0;
+        }
         if (conversion != NULL) {
           conversion->next = current;
           current = conversion;
